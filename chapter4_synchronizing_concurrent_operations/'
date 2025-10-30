@@ -116,75 +116,9 @@ struct Task {
   bool die;
 };
 
-struct PivotResult {
-  bool pivoted;
-  int pivot_boundry_left;
-  int pivot_boundry_right;
-};
 
-PivotResult arrange_around_pivot(const int start, const int end, vector<int>& nums) {
-  assert(start <= end);
-  if (start == end) {
-    return {
-      .pivoted = false,
-      .pivot_boundry_left = -1,
-      .pivot_boundry_right = -1
-    };
-  }
-  if (start + 1 == end) {
-    if (nums[end] < nums[start]) {
-      swap(start, end, nums);
-    }
-    return {
-      .pivoted = false,  
-      .pivot_boundry_left = -1,
-      .pivot_boundry_right = -1
-    };
-  }
-  int pivot = nums[(start + end) / 2];
-
-  // invariant:
-  // left of l is strictly smaller than pivot
-  // right or r is strictly greater than pivot
-  int l = start;
-  int r = end;
-
-  int i = l;
-  while (i <= r) {
-    if (nums[i] < pivot) {
-      swap(i, l, nums);
-      l++; i++;
-    } else if (nums[i] > pivot) {
-      swap(i, r, nums);
-      r--;
-    } else {
-      i++;
-    }
-  }
-
-  return {
-    .pivoted = true,
-    .pivot_boundry_left = l - 1,
-    .pivot_boundry_right = r + 1
-  };
-}
-
-void quicksort_partial_work(queue<Task>& task_q, mutex& q_mtx) {
-  while (true) {
-    Task task; 
-    {
-      lock_guard lk(q_mtx);
-      task = task_q.front(); 
-      task_q.pop();
-    }
-    if (task.die) {
-      return;
-    }
-
-    auto result = arrange_around_pivot(task_q.start_index, task_q.end_index, task_q.nums);
-
-
-  }
+void work(queue<Task>& task_q, mutex& q_mtx) {
+  
 }
 
 
