@@ -8,28 +8,22 @@
 #include <random>
 #include <functional>
 #include "sequential.hpp"
+#include "concurrent.hpp"
 #include "test.hpp"
 
 using namespace std;
 
 
 int main() {
-  test::test_quicksort(sequential::quicksort_sequential);
-  // vector<int> nums {1, 15, 4, 13, 2, 18, 3, 12, 20, 6, 14, 17, 8, 9, 10, 5, 7, 11, 19, 16};
-  //
-  // queue<Task> task_q;
-  // vector<thread> workers;
-  //
-  // for (unsigned int i=0; i < thread::hardware_concurrency() - 1; i++) {
-  //   workers.push_back(thread([&](){
-  //
-  //   }));
-  // }
-  //
-  // for (thread& w: workers) {
-  //   w.join();
-  // }
-  //
+  vector<vector<int>> nums_batch {
+    {1, 15, 4, 13, 2, 18, 3, 12, 20, 6, 14, 17, 8, 9, 10, 5, 7, 11, 19, 16},
+    {30, 25, 40, 35, 20, 45, 10, 50, 5, 55, 15, 60, 0, 70, 65, 80, 75, 90, 85, 100}
+  };
+
+  concurrent::QuicksortWorkers workers;
+  workers.sort_batch(nums_batch); 
+
+  workers.keep_alive();
 
   return 0;
 }

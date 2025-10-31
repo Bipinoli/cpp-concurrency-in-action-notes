@@ -5,24 +5,22 @@
 #include <queue>
 #include <thread>
 #include <mutex>
-#include <conditon_variable>
+#include <condition_variable>
 #include <memory>
+#include <atomic>
 #include <cassert>
+#include <stdexcept>
+#include <optional>
 
 namespace concurrent {
 
+using namespace std;
 
-struct TaskStatus {
-  int id;
-  int in_progress;
-  unique_ptr<TaskStatus> parent;
-};
 
 struct Task {
   int start_index;
   int end_index;
   vector<int>& nums;
-  bool die;
 };
 
 struct PivotResult {
@@ -31,79 +29,115 @@ struct PivotResult {
   int pivot_boundry_right;
 };
 
+
+PivotResult arrange_around_pivot(const int start, const int end, vector<int>& nums);
+
 class QuicksortWorkers {
 public:
-  //The workers must be joined in the main thread
   vector<thread> workers;
 
-  for (int i=0; i < thread::hardware_concurrency() - 1; i++) {
   QuicksortWorkers() {
-      this.workers.push_back(thread([&this](){
-        this.worker();
+    for (int i=0; i < thread::hardware_concurrency() - 1; i++) {
+      workers.push_back(thread([this](){
+        worker();
       }));
     }
   }
 
-  bool submit_batch(vector<vector<int>>& nums_batch) {
-    //TODO: only allow submission if the whole batch is finished
-    //make sure that the status mutexes are note in locked state
-    this.nums_batch = nums_batch;
-    this.task_status = {};
-    // creating mutexes in-place with default constructor
-    this.task_status_mtx = vector<mutex>(nums_batch.size());
-    for (int i=0; i<nums_batch.size(); i++) {
-      this.task_status.push_back({
-        .id = i,
-        .in_progress = 1,
-        .parent = nullptr
-      });
+  void keep_alive() {
+    for (auto& t: workers) {
+      t.join();
     }
   }
-  void run_batch() {
-    
+
+  void sort_batch(vector<vector<int>>& nums_batch) {
+    {
+      lock_guard lk(batch_mtx);
+      if (in_progress_tasks > 0) {
+        throw runtime_error("Exsiting batch hasn't finished");
+      }
+    }
+    {
+      lock_guard lk(task_q_mtx);
+      assert(task_q.empty());
+      in_progress_tasks = nums_batch.size();
+      for (vector<int>& nums: nums_batch) {
+        task_q.push({
+          .start_index = 0,
+          .end_index = static_cast<int>(nums.size() - 1),
+          .nums = nums
+        });
+      }  
+    }
+    {
+      // wait until batch finishes
+      unique_lock lk(batch_mtx);
+      batch_cv.wait(lk, [this](){
+        return in_progress_tasks == 0;
+      });
+    }
+
   }
+
+
 private:
-  vector<vector<int>>& nums_batch;
   queue<Task> task_q;
   mutex task_q_mtx;
-  vector<TaskStatus> task_status;
-  vector<mutex> task_status_mtx;
+  atomic<int> in_progress_tasks;
+  mutex batch_mtx;
+  condition_variable batch_cv;;
 
   void worker() {
     while (true) {
-      Task task; 
+      optional<Task> task_opt;
       {
-        // perhaps it is better to have a condition variable based mechanism here
-        // to avoid busy wait
-        lock_guard lk(this.task_q_mtx);
-        task = this.task_q.front(); 
-        this.task_q.pop();
+        lock_guard lk(task_q_mtx);
+        if (!task_q.empty()) {
+          // create in-place with emplace because Task can't be default constructed 
+          // due to nums being a refernece
+          task_opt.emplace(task_q.front());
+          task_q.pop();
+        }
       }
-      if (task.die) {
-        return;
+      if (!task_opt.has_value()) {
+        this_thread::yield(); 
+        continue;
       }
-
-      auto result = arrange_around_pivot(task_q.start_index, task_q.end_index, task_q.nums);
-      if (result.pivoted) {
-        scoped_lock lk(task_q_mtx, status_mtx);
-        assert(status.size() > task_q.id && status[task_q.id].empty());
+      Task task = task_opt.value();
+      auto pivot_rslt = concurrent::arrange_around_pivot(task.start_index, task.end_index, task.nums);
+      if (pivot_rslt.pivoted) {
+        scoped_lock lk(task_q_mtx, batch_mtx);
         task_q.push({
-          .start_index = task_q.start_index,
-          .end_index = result.pivot_boundry_left,
-          .nums = task_q.nums,
-          .die = false
+          .start_index = task.start_index,
+          .end_index = max(pivot_rslt.pivot_boundry_left, task.start_index),
+          .nums = task.nums
         });
         task_q.push({
-          .start_index = result.pivot_boundry_right,
-          .end_index = task_q.end_index
-          .nums = task_q.nums,
-          .die = false
+          .start_index = min(pivot_rslt.pivot_boundry_right, task.end_index),
+          .end_index = task.end_index,
+          .nums = task.nums
         });
-
+        in_progress_tasks += 1;
+      } else {
+        // the update of atomic can take some time until published to all threads
+        // so when we notify the condition variable the update may not be available yet.
+        // To avoid this we should update the atomic while holding the mutex related to the condition variable.
+        {
+          lock_guard lk(batch_mtx);
+          in_progress_tasks -= 1;
+        }
+        batch_cv.notify_one();
       }
     }
   }
 
+};
+
+
+void swap(int a, int b, vector<int>& nums) {
+  int temp = nums[a];
+  nums[a] = nums[b];
+  nums[b] = temp;
 }
 
 
