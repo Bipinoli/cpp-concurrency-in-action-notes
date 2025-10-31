@@ -21,6 +21,7 @@ struct Task {
   int start_index;
   int end_index;
   vector<int>& nums;
+  bool poison;
 };
 
 struct PivotResult {
@@ -34,7 +35,6 @@ PivotResult arrange_around_pivot(const int start, const int end, vector<int>& nu
 
 class QuicksortWorkers {
 public:
-  vector<thread> workers;
 
   QuicksortWorkers() {
     for (int i=0; i < thread::hardware_concurrency() - 1; i++) {
@@ -44,10 +44,26 @@ public:
     }
   }
 
-  void keep_alive() {
+  int number_of_workers() {
+    return workers.size();
+  }
+
+  void kill_workers() {
+    {
+      lock_guard lk(task_q_mtx);
+      for (size_t i=0; i < workers.size(); i++) {
+        task_q.push({
+          .start_index = -1,
+          .end_index = -1,
+          .nums = *(new vector<int>()),
+          .poison = true
+        });
+      }
+    }
+    // wait until all workers are killed
     for (auto& t: workers) {
       t.join();
-    }
+    } 
   }
 
   void sort_batch(vector<vector<int>>& nums_batch) {
@@ -65,7 +81,8 @@ public:
         task_q.push({
           .start_index = 0,
           .end_index = static_cast<int>(nums.size() - 1),
-          .nums = nums
+          .nums = nums,
+          .poison = false
         });
       }  
     }
@@ -81,6 +98,7 @@ public:
 
 
 private:
+  vector<thread> workers;
   queue<Task> task_q;
   mutex task_q_mtx;
   atomic<int> in_progress_tasks;
@@ -104,18 +122,23 @@ private:
         continue;
       }
       Task task = task_opt.value();
+      if (task.poison) {
+        break;
+      }
       auto pivot_rslt = concurrent::arrange_around_pivot(task.start_index, task.end_index, task.nums);
       if (pivot_rslt.pivoted) {
         scoped_lock lk(task_q_mtx, batch_mtx);
         task_q.push({
           .start_index = task.start_index,
           .end_index = max(pivot_rslt.pivot_boundry_left, task.start_index),
-          .nums = task.nums
+          .nums = task.nums,
+          .poison = false
         });
         task_q.push({
           .start_index = min(pivot_rslt.pivot_boundry_right, task.end_index),
           .end_index = task.end_index,
-          .nums = task.nums
+          .nums = task.nums,
+          .poison = false
         });
         in_progress_tasks += 1;
       } else {

@@ -11,6 +11,13 @@ using namespace std;
 
 void swap(int a, int b, vector<int>& nums);
 
+void quicksort_sequential(int start, int end, vector<int>& nums);
+
+void quicksort_sequential_batch(vector<vector<int>>& nums_batch) {
+  for (auto& nums: nums_batch) {
+    quicksort_sequential(0, nums.size() - 1, nums);
+  }
+}
 
 void quicksort_sequential(int start, int end, vector<int>& nums) {
   assert(start <= end);
