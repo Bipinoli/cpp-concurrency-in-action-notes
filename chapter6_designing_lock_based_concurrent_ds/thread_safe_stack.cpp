@@ -19,6 +19,12 @@ public:
 
   void push(T d) {
     lock_guard lk(mtx);
+    // what if data.push fails due to memory allocation failure?
+    // Well std::move() just casts the value to rvalue
+    // such that the push function would get T&& argument.
+    // So, the actual move i.e making the original variable point to nullptr
+    // only happens when the push actually works i.e only after the memory allocation if needed.
+    // Hence the exception safety is enforced.
     data.push(move(d));
   }
 
